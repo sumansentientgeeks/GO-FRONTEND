@@ -26,9 +26,9 @@ export const TeamsLobby: React.FC = () => {
     });
     const [userRole, setUserRole] = useState<'speaker' | 'audience'>('speaker');
 
-    // Default: camera and mic are ON for seamless call connection
-    const [isAudioMuted, setIsAudioMuted] = useState(false);
-    const [isVideoMuted, setIsVideoMuted] = useState(false);
+    // Default: camera and mic are OFF (muted) by default for privacy
+    const [isAudioMuted, setIsAudioMuted] = useState(true);
+    const [isVideoMuted, setIsVideoMuted] = useState(true);
     const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
     const [audioLevel, setAudioLevel] = useState<number>(0);
     const [copied, setCopied] = useState(false);
