@@ -1,7 +1,7 @@
 const envApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 const isLocalDev = typeof window !== 'undefined' && (window.location.port === '5173' || window.location.port === '3000');
 
-export const API_BASE = isLocalDev ? '/api' : (envApiUrl ? `${envApiUrl}/api` : `http://${window.location.hostname || 'localhost'}:8080/api`);
+export const API_BASE = envApiUrl ? `${envApiUrl}/api` : (isLocalDev ? '/api' : `http://${window.location.hostname || 'localhost'}:8080/api`);
 
 export interface UserAuthResponse {
     token: string;
@@ -75,14 +75,13 @@ export const createRoom = async (roomId: string): Promise<{ status: string; room
 
 export const getSFUSignalingURL = (roomId: string, userId: string, userName: string): string => {
     let wsBase: string;
-    if (isLocalDev) {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsBase = `${protocol}//${window.location.host}`;
-    } else if (envApiUrl) {
+    if (envApiUrl) {
         wsBase = envApiUrl.replace(/^http(s?):/, 'ws$1:');
-    } else {
+    } else if (typeof window !== 'undefined') {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsBase = `${protocol}//${window.location.host}`;
+        wsBase = isLocalDev ? `${protocol}//${window.location.hostname}:8080` : `${protocol}//${window.location.host}`;
+    } else {
+        wsBase = 'ws://localhost:8080';
     }
     return `${wsBase}/ws/sfu?room_id=${encodeURIComponent(roomId)}&user_id=${encodeURIComponent(userId)}&user_name=${encodeURIComponent(userName)}`;
 };
