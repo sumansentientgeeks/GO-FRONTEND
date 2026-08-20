@@ -39,26 +39,36 @@ const VideoTile: React.FC<{
     isSpeaking?: boolean;
     isPinned?: boolean;
     onPin?: () => void;
-}> = ({ stream, userName, role, isSelf, isAudioMuted, isVideoMuted, isHandRaised, isScreenSharing, isSpeaking, isPinned, onPin }) => {
+    onAutoplayBlocked?: () => void;
+}> = ({ stream, userName, role, isSelf, isAudioMuted, isVideoMuted, isHandRaised, isScreenSharing, isSpeaking, isPinned, onPin, onAutoplayBlocked }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
 
     useEffect(() => {
-        if (videoRef.current && stream) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(() => {});
+        if (videoRef.current) {
+            if (stream && stream.getVideoTracks().length > 0) {
+                videoRef.current.srcObject = stream;
+                videoRef.current.play().catch(() => {});
+            } else {
+                videoRef.current.srcObject = null;
+            }
         }
     }, [stream, isVideoMuted, isScreenSharing]);
 
     useEffect(() => {
-        if (!isSelf && audioRef.current && stream) {
-            audioRef.current.srcObject = stream;
-            audioRef.current.volume = 1.0;
-            audioRef.current.play().catch((err) => {
-                console.warn('Remote audio autoplay blocked:', err);
-            });
+        if (!isSelf && audioRef.current) {
+            if (stream && stream.getAudioTracks().length > 0) {
+                audioRef.current.srcObject = stream;
+                audioRef.current.volume = 1.0;
+                audioRef.current.play().catch((err) => {
+                    console.warn('Remote audio autoplay blocked:', err);
+                    onAutoplayBlocked?.();
+                });
+            } else {
+                audioRef.current.srcObject = null;
+            }
         }
-    }, [stream, isSelf]);
+    }, [stream, isSelf, onAutoplayBlocked]);
 
     const hasVideo = stream && stream.getVideoTracks().length > 0 && stream.getVideoTracks().some(t => t.enabled);
     const showVideo = (isScreenSharing || !isVideoMuted) && hasVideo;
@@ -143,6 +153,34 @@ export const TeamsMeetingRoom: React.FC = () => {
     // By default camera and mic are OFF
     const initialAudio = sessionStorage.getItem('teams_initial_audio') === 'true';
     const initialVideo = sessionStorage.getItem('teams_initial_video') === 'true';
+
+    const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+
+    const handleUnlockAudio = () => {
+        try {
+            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+            if (AudioContextClass) {
+                const tempCtx = new AudioContextClass();
+                tempCtx.resume().then(() => tempCtx.close()).catch(() => {});
+            }
+        } catch (e) {}
+        document.querySelectorAll('audio').forEach((el) => {
+            el.play().catch(() => {});
+        });
+        setAutoplayBlocked(false);
+    };
+
+    useEffect(() => {
+        const handleUserGesture = () => {
+            handleUnlockAudio();
+        };
+        window.addEventListener('click', handleUserGesture, { once: true });
+        window.addEventListener('touchstart', handleUserGesture, { once: true });
+        return () => {
+            window.removeEventListener('click', handleUserGesture);
+            window.removeEventListener('touchstart', handleUserGesture);
+        };
+    }, []);
 
     const {
         connected,
@@ -314,6 +352,31 @@ export const TeamsMeetingRoom: React.FC = () => {
                 </div>
             )}
 
+            {/* Audio Autoplay Blocked Banner */}
+            {autoplayBlocked && (
+                <div 
+                    onClick={handleUnlockAudio} 
+                    style={{
+                        backgroundColor: '#f59e0b',
+                        color: '#1e293b',
+                        padding: '10px 16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '10px',
+                        fontWeight: 600,
+                        fontSize: '0.9rem',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                        zIndex: 40,
+                        transition: 'all 0.2s ease'
+                    }}
+                >
+                    <Volume2 size={18} />
+                    <span>⚠️ Audio autoplay blocked by browser. Click here to enable meeting audio.</span>
+                </div>
+            )}
+
             {/* Center Call Stage */}
             <div className="teams-stage-layout">
                 {/* Main Video Area */}
@@ -415,6 +478,7 @@ export const TeamsMeetingRoom: React.FC = () => {
                                             isSpeaking={activeSpeakerId === p.userId}
                                             isPinned={pinnedUserId === p.userId}
                                             onPin={() => setPinnedUserId(pinnedUserId === p.userId ? null : p.userId)}
+                                            onAutoplayBlocked={() => setAutoplayBlocked(true)}
                                         />
                                     );
                                 })}
@@ -439,6 +503,7 @@ export const TeamsMeetingRoom: React.FC = () => {
                                                 isSpeaking={activeSpeakerId === peerId}
                                                 isPinned={pinnedUserId === peerId}
                                                 onPin={() => setPinnedUserId(pinnedUserId === peerId ? null : peerId)}
+                                                onAutoplayBlocked={() => setAutoplayBlocked(true)}
                                             />
                                         );
                                     })}
@@ -460,6 +525,7 @@ export const TeamsMeetingRoom: React.FC = () => {
                                             isScreenSharing={true}
                                             isSpeaking={activeSpeakerId === activeScreenShare.userId}
                                             isPinned={false}
+                                            onAutoplayBlocked={() => setAutoplayBlocked(true)}
                                         />
                                     </div>
                                     <div className="teams-presentation-sidebar">

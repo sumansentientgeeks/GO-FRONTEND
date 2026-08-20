@@ -50,7 +50,21 @@ const RTC_CONFIG: RTCConfiguration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        {
+            urls: [
+                'turn:openrelay.metered.ca:80',
+                'turn:openrelay.metered.ca:443',
+                'turn:openrelay.metered.ca:443?transport=tcp'
+            ],
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        }
     ],
+    iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require',
 };
 
 export const useWebRTCSFU = (
@@ -95,6 +109,8 @@ export const useWebRTCSFU = (
     const wsRef = useRef<WebSocket | null>(null);
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
+    const rawCameraStreamRef = useRef<MediaStream | null>(null);
+    const cameraVideoTrackRef = useRef<MediaStreamTrack | null>(null);
     const screenStreamRef = useRef<MediaStream | null>(null);
     const videoSenderRef = useRef<RTCRtpSender | null>(null);
 
@@ -128,6 +144,11 @@ export const useWebRTCSFU = (
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach((t) => t.stop());
             localStreamRef.current = null;
+        }
+
+        if (rawCameraStreamRef.current) {
+            rawCameraStreamRef.current.getTracks().forEach((t) => t.stop());
+            rawCameraStreamRef.current = null;
         }
 
         if (screenStreamRef.current) {
@@ -187,6 +208,8 @@ export const useWebRTCSFU = (
                 stream.getVideoTracks().forEach((t) => (t.enabled = initialVideo));
 
                 localStreamRef.current = stream;
+                rawCameraStreamRef.current = stream;
+                cameraVideoTrackRef.current = stream.getVideoTracks()[0] || null;
                 setLocalStream(stream);
 
                 // 2. Setup AudioContext for local voice activity
@@ -210,28 +233,29 @@ export const useWebRTCSFU = (
                 const pc = new RTCPeerConnection(RTC_CONFIG);
                 pcRef.current = pc;
 
-                // Add transceivers explicitly so m-lines & ICE ufrag are always generated
-                try {
-                    pc.addTransceiver('audio', { direction: 'sendrecv' });
-                    pc.addTransceiver('video', { direction: 'sendrecv' });
-                } catch (trErr) {
-                    console.warn('addTransceiver error:', trErr);
+                // Add local tracks cleanly to PeerConnection
+                const audioTrack = stream.getAudioTracks()[0];
+                if (audioTrack) {
+                    pc.addTrack(audioTrack, stream);
+                } else {
+                    try {
+                        pc.addTransceiver('audio', { direction: 'sendrecv' });
+                    } catch (trErr) {
+                        console.warn('addTransceiver audio error:', trErr);
+                    }
                 }
 
-                // Add local tracks to PeerConnection
-                stream.getTracks().forEach((track) => {
-                    const sender = pc.addTrack(track, stream);
-                    if (track.kind === 'video') {
-                        videoSenderRef.current = sender;
-                    }
-                });
-
-                if (!videoSenderRef.current) {
-                    const videoTransceiver = pc.getTransceivers().find(
-                        (t) => t.receiver?.track?.kind === 'video' || t.sender?.track?.kind === 'video'
-                    );
-                    if (videoTransceiver && videoTransceiver.sender) {
-                        videoSenderRef.current = videoTransceiver.sender;
+                const videoTrack = stream.getVideoTracks()[0];
+                if (videoTrack) {
+                    videoSenderRef.current = pc.addTrack(videoTrack, stream);
+                } else {
+                    try {
+                        const tr = pc.addTransceiver('video', { direction: 'sendrecv' });
+                        if (tr.sender) {
+                            videoSenderRef.current = tr.sender;
+                        }
+                    } catch (trErr) {
+                        console.warn('addTransceiver video error:', trErr);
                     }
                 }
 
@@ -252,14 +276,16 @@ export const useWebRTCSFU = (
                         const existing = next.get(trackOwnerId);
 
                         if (existing) {
-                            if (!existing.stream.getTracks().some((t) => t.id === remoteTrack.id)) {
-                                existing.stream.addTrack(remoteTrack);
-                            }
+                            const existingTracks = existing.stream.getTracks();
+                            const hasTrack = existingTracks.some((t) => t.id === remoteTrack.id);
+                            const updatedTracks = hasTrack ? existingTracks : [...existingTracks, remoteTrack];
+                            const updatedStream = new MediaStream(updatedTracks);
+
                             next.set(trackOwnerId, {
                                 ...existing,
                                 userName: knownParticipant?.userName || existing.userName,
                                 role: knownParticipant?.role || existing.role,
-                                stream: existing.stream,
+                                stream: updatedStream,
                             });
                         } else {
                             const newMediaStream = streamOwner || new MediaStream([remoteTrack]);
@@ -682,9 +708,11 @@ export const useWebRTCSFU = (
         setIsAudioEnabled(nextState);
         sendWS({
             type: 'media_state',
+            room_id: roomId,
+            user_id: userId,
             payload: { isAudioMuted: !nextState, isVideoMuted: !isVideoEnabled, isScreenSharing },
         });
-    }, [isAudioEnabled, isVideoEnabled, isScreenSharing, sendWS]);
+    }, [isAudioEnabled, isVideoEnabled, isScreenSharing, roomId, userId, sendWS]);
 
     const toggleVideo = useCallback(() => {
         if (localStreamRef.current) {
@@ -694,10 +722,12 @@ export const useWebRTCSFU = (
             setIsVideoEnabled(nextState);
             sendWS({
                 type: 'media_state',
+                room_id: roomId,
+                user_id: userId,
                 payload: { isAudioMuted: !isAudioEnabled, isVideoMuted: !nextState, isScreenSharing },
             });
         }
-    }, [isAudioEnabled, isVideoEnabled, isScreenSharing, sendWS]);
+    }, [isAudioEnabled, isVideoEnabled, isScreenSharing, roomId, userId, sendWS]);
 
     const stopScreenShare = useCallback(async () => {
         if (screenStreamRef.current) {
@@ -705,17 +735,18 @@ export const useWebRTCSFU = (
             screenStreamRef.current = null;
         }
 
-        const localVideoTrack = localStreamRef.current?.getVideoTracks()[0];
+        const camTrack = cameraVideoTrackRef.current;
         if (videoSenderRef.current) {
             try {
-                await videoSenderRef.current.replaceTrack(localVideoTrack || null);
+                await videoSenderRef.current.replaceTrack(camTrack && camTrack.readyState === 'live' ? camTrack : null);
             } catch (err) {
                 console.warn('Error restoring video track:', err);
             }
         }
 
-        if (localStreamRef.current) {
-            setLocalStream(localStreamRef.current);
+        if (rawCameraStreamRef.current) {
+            setLocalStream(rawCameraStreamRef.current);
+            localStreamRef.current = rawCameraStreamRef.current;
         }
 
         setIsScreenSharing(false);
@@ -771,8 +802,11 @@ export const useWebRTCSFU = (
                 }
 
                 // Show screen share in local preview
+                const currentAudioTracks = localStreamRef.current ? localStreamRef.current.getAudioTracks() : [];
+                const screenAudioTracks = screenStream.getAudioTracks();
                 const updatedStream = new MediaStream([
-                    ...(localStreamRef.current ? localStreamRef.current.getAudioTracks() : []),
+                    ...currentAudioTracks,
+                    ...screenAudioTracks,
                     screenVideoTrack,
                 ]);
                 setLocalStream(updatedStream);
