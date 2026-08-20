@@ -39,32 +39,51 @@ export interface RemoteParticipantStream {
 }
 
 export const DEFAULT_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
-    echoCancellation: true,        // Cancels audio feedback/echo from speakers
-    noiseSuppression: true,        // Filters out background noise, fans, keyboard typing
-    autoGainControl: true,         // Automatically levels microphone volume
-    sampleRate: 48000,             // 48 kHz HD Opus voice quality
-    channelCount: 1,               // Mono clarity optimized for speech
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    sampleRate: 48000,
+    channelCount: 1,
 };
 
-const RTC_CONFIG: RTCConfiguration = {
-    iceServers: [
+const getRTCConfiguration = (): RTCConfiguration => {
+    const iceServers: RTCIceServer[] = [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' },
-        {
+    ];
+
+    const turnUrl = import.meta.env.VITE_TURN_URL;
+    const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+    const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+
+    if (turnUrl) {
+        const urls = turnUrl.split(',').map((u: string) => u.trim());
+        iceServers.push({
+            urls,
+            username: turnUsername,
+            credential: turnCredential,
+        });
+    } else {
+        // Fallback open TURN servers for symmetric NAT traversal in production
+        iceServers.push({
             urls: [
                 'turn:openrelay.metered.ca:80',
                 'turn:openrelay.metered.ca:443',
-                'turn:openrelay.metered.ca:443?transport=tcp'
+                'turn:openrelay.metered.ca:443?transport=tcp',
             ],
             username: 'openrelayproject',
-            credential: 'openrelayproject'
-        }
-    ],
-    iceCandidatePoolSize: 10,
-    bundlePolicy: 'max-bundle',
-    rtcpMuxPolicy: 'require',
+            credential: 'openrelayproject',
+        });
+    }
+
+    return {
+        iceServers,
+        iceCandidatePoolSize: 10,
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+    };
 };
 
 export const useWebRTCSFU = (
@@ -183,7 +202,7 @@ export const useWebRTCSFU = (
                 setConnecting(true);
                 setError(null);
 
-                // 1. Get user media (mic with AI Noise Suppression + webcam)
+                // 1. Get user media (mic + webcam)
                 let stream: MediaStream;
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({
@@ -194,7 +213,11 @@ export const useWebRTCSFU = (
                     try {
                         stream = await navigator.mediaDevices.getUserMedia({ audio: DEFAULT_AUDIO_CONSTRAINTS });
                     } catch (e2) {
-                        stream = new MediaStream();
+                        try {
+                            stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        } catch (e3) {
+                            stream = new MediaStream();
+                        }
                     }
                 }
 
@@ -229,8 +252,8 @@ export const useWebRTCSFU = (
                     console.warn('AudioContext setup error:', e);
                 }
 
-                // 3. Initialize RTCPeerConnection
-                const pc = new RTCPeerConnection(RTC_CONFIG);
+                // 3. Initialize RTCPeerConnection with STUN & TURN
+                const pc = new RTCPeerConnection(getRTCConfiguration());
                 pcRef.current = pc;
 
                 // Add local tracks cleanly to PeerConnection
@@ -266,10 +289,32 @@ export const useWebRTCSFU = (
                     const rawId = streamOwner ? streamOwner.id : '';
                     const trackOwnerId = (rawId && rawId !== 'default' && rawId.length > 2) ? rawId : remoteTrack.id;
 
-                    // Resolve known display name & role from participants
                     const knownParticipant = participantsRef.current.find((p) => p.userId === trackOwnerId);
                     const displayName = knownParticipant?.userName || `User ${trackOwnerId.slice(0, 5)}`;
                     const displayRole = knownParticipant?.role || 'speaker';
+
+                    // Track listener to react immediately to track mute/unmute events
+                    remoteTrack.onmute = () => {
+                        if (remoteTrack.kind === 'video') {
+                            setRemoteStreams((prev) => {
+                                const next = new Map(prev);
+                                const item = next.get(trackOwnerId);
+                                if (item) next.set(trackOwnerId, { ...item, isVideoMuted: true });
+                                return next;
+                            });
+                        }
+                    };
+
+                    remoteTrack.onunmute = () => {
+                        if (remoteTrack.kind === 'video') {
+                            setRemoteStreams((prev) => {
+                                const next = new Map(prev);
+                                const item = next.get(trackOwnerId);
+                                if (item) next.set(trackOwnerId, { ...item, isVideoMuted: false });
+                                return next;
+                            });
+                        }
+                    };
 
                     setRemoteStreams((prev) => {
                         const next = new Map(prev);
@@ -286,6 +331,8 @@ export const useWebRTCSFU = (
                                 userName: knownParticipant?.userName || existing.userName,
                                 role: knownParticipant?.role || existing.role,
                                 stream: updatedStream,
+                                isVideoMuted: remoteTrack.kind === 'video' ? false : existing.isVideoMuted,
+                                isAudioMuted: remoteTrack.kind === 'audio' ? false : existing.isAudioMuted,
                             });
                         } else {
                             const newMediaStream = streamOwner || new MediaStream([remoteTrack]);
@@ -294,10 +341,10 @@ export const useWebRTCSFU = (
                                 userName: displayName,
                                 role: displayRole,
                                 stream: newMediaStream,
-                                isAudioMuted: knownParticipant?.isAudioMuted,
-                                isVideoMuted: knownParticipant?.isVideoMuted,
-                                isHandRaised: knownParticipant?.isHandRaised,
-                                isScreenSharing: knownParticipant?.isScreenSharing,
+                                isAudioMuted: knownParticipant?.isAudioMuted ?? (remoteTrack.kind === 'audio' ? false : undefined),
+                                isVideoMuted: knownParticipant?.isVideoMuted ?? (remoteTrack.kind === 'video' ? false : undefined),
+                                isHandRaised: knownParticipant?.isHandRaised ?? false,
+                                isScreenSharing: knownParticipant?.isScreenSharing ?? false,
                             });
                         }
                         return next;
@@ -347,7 +394,7 @@ export const useWebRTCSFU = (
                             },
                         });
 
-                        // Broadcast initial media states so room peers know immediately
+                        // Broadcast initial media states
                         sendWS({
                             type: 'media_state',
                             room_id: roomId,
@@ -371,10 +418,12 @@ export const useWebRTCSFU = (
                             case 'answer':
                                 if (msg.sdp && pcRef.current) {
                                     const sdpObj = typeof msg.sdp === 'string' ? JSON.parse(msg.sdp) : msg.sdp;
-                                    await pcRef.current.setRemoteDescription(new RTCSessionDescription({
-                                        type: 'answer',
-                                        sdp: sdpObj.sdp || sdpObj,
-                                    }));
+                                    if (pcRef.current.signalingState === 'have-local-offer') {
+                                        await pcRef.current.setRemoteDescription(new RTCSessionDescription({
+                                            type: 'answer',
+                                            sdp: sdpObj.sdp || sdpObj,
+                                        }));
+                                    }
                                     setConnected(true);
                                     setConnecting(false);
                                 }
@@ -383,6 +432,12 @@ export const useWebRTCSFU = (
                             case 'offer':
                                 if (msg.sdp && pcRef.current) {
                                     const sdpObj = typeof msg.sdp === 'string' ? JSON.parse(msg.sdp) : msg.sdp;
+                                    
+                                    // Handle WebRTC Glare / collision with rollback if needed
+                                    if (pcRef.current.signalingState === 'have-local-offer') {
+                                        await pcRef.current.setLocalDescription({ type: 'rollback' });
+                                    }
+
                                     await pcRef.current.setRemoteDescription(new RTCSessionDescription({
                                         type: 'offer',
                                         sdp: sdpObj.sdp || sdpObj,
@@ -415,7 +470,6 @@ export const useWebRTCSFU = (
                                 if (msg.payload) {
                                     const raw = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload;
                                     if (Array.isArray(raw)) {
-                                        // Exclude current user so participants strictly represents other room attendees
                                         const list: Participant[] = raw
                                             .filter((p: any) => p.user_id !== userId)
                                             .map((p: any) => ({
@@ -454,6 +508,12 @@ export const useWebRTCSFU = (
                             case 'peer_joined':
                                 if (msg.user_id === userId) break;
                                 showToast(`${msg.user_name || 'A user'} joined the meeting`, 'user_join');
+                                
+                                let joinedState: any = {};
+                                if (msg.payload) {
+                                    joinedState = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload;
+                                }
+
                                 setParticipants((prev) => {
                                     if (prev.some((p) => p.userId === msg.user_id)) {
                                         return prev.map((p) =>
@@ -462,6 +522,10 @@ export const useWebRTCSFU = (
                                                       ...p,
                                                       userName: msg.user_name || p.userName,
                                                       role: msg.role || p.role,
+                                                      isAudioMuted: joinedState.is_audio_muted ?? p.isAudioMuted,
+                                                      isVideoMuted: joinedState.is_video_muted ?? p.isVideoMuted,
+                                                      isScreenSharing: joinedState.is_screen_sharing ?? p.isScreenSharing,
+                                                      isHandRaised: joinedState.is_hand_raised ?? p.isHandRaised,
                                                   }
                                                 : p
                                         );
@@ -472,13 +536,14 @@ export const useWebRTCSFU = (
                                             userId: msg.user_id,
                                             userName: msg.user_name || `User ${msg.user_id.slice(0, 5)}`,
                                             role: msg.role || 'speaker',
-                                            isAudioMuted: true,
-                                            isVideoMuted: true,
-                                            isHandRaised: false,
-                                            isScreenSharing: false,
+                                            isAudioMuted: joinedState.is_audio_muted ?? false,
+                                            isVideoMuted: joinedState.is_video_muted ?? false,
+                                            isHandRaised: joinedState.is_hand_raised ?? false,
+                                            isScreenSharing: joinedState.is_screen_sharing ?? false,
                                         },
                                     ];
                                 });
+
                                 setRemoteStreams((prev) => {
                                     const next = new Map(prev);
                                     const existing = next.get(msg.user_id);
@@ -487,10 +552,15 @@ export const useWebRTCSFU = (
                                             ...existing,
                                             userName: msg.user_name || existing.userName,
                                             role: msg.role || existing.role,
+                                            isAudioMuted: joinedState.is_audio_muted ?? existing.isAudioMuted,
+                                            isVideoMuted: joinedState.is_video_muted ?? existing.isVideoMuted,
+                                            isScreenSharing: joinedState.is_screen_sharing ?? existing.isScreenSharing,
+                                            isHandRaised: joinedState.is_hand_raised ?? existing.isHandRaised,
                                         });
                                     }
                                     return next;
                                 });
+
                                 // Add system notification message in chat
                                 setMessages((prev) => [
                                     ...prev,
@@ -635,7 +705,7 @@ export const useWebRTCSFU = (
 
                 ws.onerror = (e) => {
                     console.error('SFU WebSocket Error:', e);
-                    setError('Unable to connect to WebRTC SFU server on port 8080');
+                    setError('Unable to connect to WebRTC SFU signaling server');
                     setConnecting(false);
                 };
 
@@ -714,19 +784,38 @@ export const useWebRTCSFU = (
         });
     }, [isAudioEnabled, isVideoEnabled, isScreenSharing, roomId, userId, sendWS]);
 
-    const toggleVideo = useCallback(() => {
+    const toggleVideo = useCallback(async () => {
+        const nextState = !isVideoEnabled;
         if (localStreamRef.current) {
-            const tracks = localStreamRef.current.getVideoTracks();
-            const nextState = !isVideoEnabled;
+            let tracks = localStreamRef.current.getVideoTracks();
+            if (tracks.length === 0 && nextState) {
+                try {
+                    const camStream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { max: 30 } }
+                    });
+                    const newVideoTrack = camStream.getVideoTracks()[0];
+                    if (newVideoTrack) {
+                        localStreamRef.current.addTrack(newVideoTrack);
+                        rawCameraStreamRef.current = localStreamRef.current;
+                        cameraVideoTrackRef.current = newVideoTrack;
+                        if (pcRef.current) {
+                            videoSenderRef.current = pcRef.current.addTrack(newVideoTrack, localStreamRef.current);
+                        }
+                        tracks = [newVideoTrack];
+                    }
+                } catch (e) {
+                    console.error('Failed to get camera track on toggle:', e);
+                }
+            }
             tracks.forEach((t) => (t.enabled = nextState));
-            setIsVideoEnabled(nextState);
-            sendWS({
-                type: 'media_state',
-                room_id: roomId,
-                user_id: userId,
-                payload: { isAudioMuted: !isAudioEnabled, isVideoMuted: !nextState, isScreenSharing },
-            });
         }
+        setIsVideoEnabled(nextState);
+        sendWS({
+            type: 'media_state',
+            room_id: roomId,
+            user_id: userId,
+            payload: { isAudioMuted: !isAudioEnabled, isVideoMuted: !nextState, isScreenSharing },
+        });
     }, [isAudioEnabled, isVideoEnabled, isScreenSharing, roomId, userId, sendWS]);
 
     const stopScreenShare = useCallback(async () => {

@@ -47,7 +47,9 @@ const VideoTile: React.FC<{
     useEffect(() => {
         if (videoRef.current) {
             if (stream && stream.getVideoTracks().length > 0) {
-                videoRef.current.srcObject = stream;
+                if (videoRef.current.srcObject !== stream) {
+                    videoRef.current.srcObject = stream;
+                }
                 videoRef.current.play().catch(() => {});
             } else {
                 videoRef.current.srcObject = null;
@@ -58,7 +60,9 @@ const VideoTile: React.FC<{
     useEffect(() => {
         if (!isSelf && audioRef.current) {
             if (stream && stream.getAudioTracks().length > 0) {
-                audioRef.current.srcObject = stream;
+                if (audioRef.current.srcObject !== stream) {
+                    audioRef.current.srcObject = stream;
+                }
                 audioRef.current.volume = 1.0;
                 audioRef.current.play().catch((err) => {
                     console.warn('Remote audio autoplay blocked:', err);
@@ -70,23 +74,24 @@ const VideoTile: React.FC<{
         }
     }, [stream, isSelf, onAutoplayBlocked]);
 
-    const hasVideo = stream && stream.getVideoTracks().length > 0 && stream.getVideoTracks().some(t => t.enabled);
-    const showVideo = (isScreenSharing || !isVideoMuted) && hasVideo;
+    const hasLiveVideoTrack = !!(stream && stream.getVideoTracks().length > 0 && stream.getVideoTracks().some(t => t.readyState === 'live'));
+    const showVideo = (isScreenSharing || !isVideoMuted) && hasLiveVideoTrack;
     const avatarBg = getAvatarGradient(userName);
 
     return (
         <div className={`teams-video-tile ${isSpeaking ? 'active-speaker' : ''} ${isPinned ? 'pinned-tile' : ''} ${isScreenSharing ? 'tile-screen-share' : ''}`}>
             {!isSelf && <audio ref={audioRef} autoPlay playsInline />}
 
-            {showVideo ? (
-                <video 
-                    ref={videoRef}
-                    autoPlay 
-                    playsInline 
-                    muted={true} 
-                    className={`teams-tile-video ${isSelf && !isScreenSharing ? 'mirror' : ''} ${isScreenSharing ? 'screen-share' : ''}`}
-                />
-            ) : (
+            <video 
+                ref={videoRef}
+                autoPlay 
+                playsInline 
+                muted={true} 
+                className={`teams-tile-video ${isSelf && !isScreenSharing ? 'mirror' : ''} ${isScreenSharing ? 'screen-share' : ''}`}
+                style={{ display: showVideo ? 'block' : 'none' }}
+            />
+
+            {!showVideo && (
                 <div className="teams-tile-avatar-view">
                     <div className="teams-tile-avatar" style={{ background: avatarBg }}>
                         {userName.charAt(0).toUpperCase()}
@@ -471,8 +476,8 @@ export const TeamsMeetingRoom: React.FC = () => {
                                             userName={p.userName || remote?.userName || `User ${p.userId.slice(0, 5)}`}
                                             role={p.role || remote?.role || 'speaker'}
                                             isSelf={false}
-                                            isAudioMuted={p.isAudioMuted ?? remote?.isAudioMuted ?? true}
-                                            isVideoMuted={sharing ? false : (p.isVideoMuted ?? remote?.isVideoMuted ?? true)}
+                                            isAudioMuted={p.isAudioMuted ?? remote?.isAudioMuted ?? false}
+                                            isVideoMuted={sharing ? false : (p.isVideoMuted ?? remote?.isVideoMuted ?? false)}
                                             isHandRaised={p.isHandRaised ?? remote?.isHandRaised}
                                             isScreenSharing={sharing}
                                             isSpeaking={activeSpeakerId === p.userId}
@@ -496,8 +501,8 @@ export const TeamsMeetingRoom: React.FC = () => {
                                                 userName={remote.userName || `User ${peerId.slice(0, 5)}`}
                                                 role={remote.role || 'speaker'}
                                                 isSelf={false}
-                                                isAudioMuted={remote.isAudioMuted}
-                                                isVideoMuted={sharing ? false : (remote.isVideoMuted ?? true)}
+                                                isAudioMuted={remote.isAudioMuted ?? false}
+                                                isVideoMuted={sharing ? false : (remote.isVideoMuted ?? false)}
                                                 isHandRaised={remote.isHandRaised}
                                                 isScreenSharing={sharing}
                                                 isSpeaking={activeSpeakerId === peerId}
