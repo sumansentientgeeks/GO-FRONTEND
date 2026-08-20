@@ -757,7 +757,12 @@ export const useWebRTCSFU = (
             let tracks = localStreamRef.current.getAudioTracks();
             if (tracks.length === 0 && nextState) {
                 try {
-                    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: DEFAULT_AUDIO_CONSTRAINTS });
+                    let audioStream: MediaStream;
+                    try {
+                        audioStream = await navigator.mediaDevices.getUserMedia({ audio: DEFAULT_AUDIO_CONSTRAINTS });
+                    } catch {
+                        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    }
                     const newAudioTrack = audioStream.getAudioTracks()[0];
                     if (newAudioTrack) {
                         localStreamRef.current.addTrack(newAudioTrack);
@@ -766,8 +771,10 @@ export const useWebRTCSFU = (
                         }
                         tracks = [newAudioTrack];
                     }
-                } catch (e) {
-                    console.error('Failed to get microphone track on toggle:', e);
+                } catch (e: any) {
+                    console.warn('Microphone permission blocked or not available:', e);
+                    showToast('⚠️ Microphone access blocked. Please allow microphone permission in your browser address bar.', 'warning');
+                    return;
                 }
             }
             tracks.forEach((t) => (t.enabled = nextState));
@@ -779,7 +786,7 @@ export const useWebRTCSFU = (
             user_id: userId,
             payload: { isAudioMuted: !nextState, isVideoMuted: !isVideoEnabled, isScreenSharing },
         });
-    }, [isAudioEnabled, isVideoEnabled, isScreenSharing, roomId, userId, sendWS]);
+    }, [isAudioEnabled, isVideoEnabled, isScreenSharing, roomId, userId, sendWS, showToast]);
 
     const toggleVideo = useCallback(async () => {
         const nextState = !isVideoEnabled;
@@ -787,9 +794,14 @@ export const useWebRTCSFU = (
             let tracks = localStreamRef.current.getVideoTracks();
             if (tracks.length === 0 && nextState) {
                 try {
-                    const camStream = await navigator.mediaDevices.getUserMedia({
-                        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { max: 30 } }
-                    });
+                    let camStream: MediaStream;
+                    try {
+                        camStream = await navigator.mediaDevices.getUserMedia({
+                            video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { max: 30 } }
+                        });
+                    } catch {
+                        camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    }
                     const newVideoTrack = camStream.getVideoTracks()[0];
                     if (newVideoTrack) {
                         localStreamRef.current.addTrack(newVideoTrack);
@@ -800,8 +812,10 @@ export const useWebRTCSFU = (
                         }
                         tracks = [newVideoTrack];
                     }
-                } catch (e) {
-                    console.error('Failed to get camera track on toggle:', e);
+                } catch (e: any) {
+                    console.warn('Camera permission blocked or not available:', e);
+                    showToast('⚠️ Camera access blocked. Please allow camera permission in your browser address bar.', 'warning');
+                    return;
                 }
             }
             tracks.forEach((t) => (t.enabled = nextState));
@@ -813,7 +827,7 @@ export const useWebRTCSFU = (
             user_id: userId,
             payload: { isAudioMuted: !isAudioEnabled, isVideoMuted: !nextState, isScreenSharing },
         });
-    }, [isAudioEnabled, isVideoEnabled, isScreenSharing, roomId, userId, sendWS]);
+    }, [isVideoEnabled, isAudioEnabled, isScreenSharing, roomId, userId, sendWS, showToast]);
 
     const stopScreenShare = useCallback(async () => {
         if (screenStreamRef.current) {
