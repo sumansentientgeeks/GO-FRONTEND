@@ -42,12 +42,15 @@ export const loginUser = async (email: string, password: string): Promise<UserAu
     return response.json();
 };
 
-export const getLiveKitToken = async (roomId: string, token: string) => {
-    const response = await fetch(`${API_BASE}/rooms/${roomId}/call-token`, {
+export const getLiveKitToken = async (roomId: string, token?: string, userName?: string) => {
+    const headers: Record<string, string> = {};
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    const query = userName ? `?user_name=${encodeURIComponent(userName)}` : '';
+    const response = await fetch(`${API_BASE}/rooms/${roomId}/call-token${query}`, {
         method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${token}`
-        },
+        headers,
     });
 
     if (!response.ok) {

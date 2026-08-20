@@ -20,15 +20,11 @@ export const VideoRoom = () => {
     useEffect(() => {
         const fetchToken = async () => {
             try {
-                const apiToken = sessionStorage.getItem('api_token');
-                if (!apiToken) {
-                    navigate('/');
-                    return;
-                }
-
                 if (!roomId) return;
+                const apiToken = sessionStorage.getItem('api_token') || undefined;
+                const displayName = sessionStorage.getItem('teams_display_name') || undefined;
 
-                const data = await getLiveKitToken(roomId, apiToken);
+                const data = await getLiveKitToken(roomId, apiToken, displayName);
                 setToken(data.token);
             } catch (err: any) {
                 setError(err.message || 'Could not connect to room');
