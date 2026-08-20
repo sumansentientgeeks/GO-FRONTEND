@@ -4,6 +4,7 @@ import {
   LiveKitRoom,
   VideoConference,
   RoomAudioRenderer,
+  StartAudio,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { getLiveKitToken } from '../api';
@@ -57,8 +58,7 @@ export const VideoRoom = () => {
         );
     }
 
-    // In a real app, this would be injected via environment variables
-    const liveKitUrl = 'ws://localhost:7880';
+    const liveKitUrl = import.meta.env.VITE_LIVEKIT_URL || 'wss://mychat-j2vuijbd.livekit.cloud';
 
     return (
         <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column' }}>
@@ -89,10 +89,13 @@ export const VideoRoom = () => {
                 serverUrl={liveKitUrl}
                 data-lk-theme="default"
                 style={{ flex: 1 }}
+                connect={true}
+                connectOptions={{ autoSubscribe: true }}
                 onDisconnected={() => navigate('/')}
             >
                 <VideoConference />
                 <RoomAudioRenderer />
+                <StartAudio label="Click to allow audio playback" />
             </LiveKitRoom>
         </div>
     );

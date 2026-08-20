@@ -658,17 +658,32 @@ export const useWebRTCSFU = (
     }, [isAudioEnabled, userId, activeSpeakerId]);
 
     // Media Controls
-    const toggleAudio = useCallback(() => {
+    const toggleAudio = useCallback(async () => {
+        const nextState = !isAudioEnabled;
         if (localStreamRef.current) {
-            const tracks = localStreamRef.current.getAudioTracks();
-            const nextState = !isAudioEnabled;
+            let tracks = localStreamRef.current.getAudioTracks();
+            if (tracks.length === 0 && nextState) {
+                try {
+                    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: DEFAULT_AUDIO_CONSTRAINTS });
+                    const newAudioTrack = audioStream.getAudioTracks()[0];
+                    if (newAudioTrack) {
+                        localStreamRef.current.addTrack(newAudioTrack);
+                        if (pcRef.current) {
+                            pcRef.current.addTrack(newAudioTrack, localStreamRef.current);
+                        }
+                        tracks = [newAudioTrack];
+                    }
+                } catch (e) {
+                    console.error('Failed to get microphone track on toggle:', e);
+                }
+            }
             tracks.forEach((t) => (t.enabled = nextState));
-            setIsAudioEnabled(nextState);
-            sendWS({
-                type: 'media_state',
-                payload: { isAudioMuted: !nextState, isVideoMuted: !isVideoEnabled, isScreenSharing },
-            });
         }
+        setIsAudioEnabled(nextState);
+        sendWS({
+            type: 'media_state',
+            payload: { isAudioMuted: !nextState, isVideoMuted: !isVideoEnabled, isScreenSharing },
+        });
     }, [isAudioEnabled, isVideoEnabled, isScreenSharing, sendWS]);
 
     const toggleVideo = useCallback(() => {

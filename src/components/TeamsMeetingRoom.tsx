@@ -53,7 +53,10 @@ const VideoTile: React.FC<{
     useEffect(() => {
         if (!isSelf && audioRef.current && stream) {
             audioRef.current.srcObject = stream;
-            audioRef.current.play().catch(() => {});
+            audioRef.current.volume = 1.0;
+            audioRef.current.play().catch((err) => {
+                console.warn('Remote audio autoplay blocked:', err);
+            });
         }
     }, [stream, isSelf]);
 
@@ -70,7 +73,7 @@ const VideoTile: React.FC<{
                     ref={videoRef}
                     autoPlay 
                     playsInline 
-                    muted={isSelf} 
+                    muted={true} 
                     className={`teams-tile-video ${isSelf && !isScreenSharing ? 'mirror' : ''} ${isScreenSharing ? 'screen-share' : ''}`}
                 />
             ) : (
