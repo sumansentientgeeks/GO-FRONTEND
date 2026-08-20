@@ -63,11 +63,15 @@ const VideoTile: React.FC<{
                 if (audioRef.current.srcObject !== stream) {
                     audioRef.current.srcObject = stream;
                 }
+                audioRef.current.muted = false;
                 audioRef.current.volume = 1.0;
-                audioRef.current.play().catch((err) => {
-                    console.warn('Remote audio autoplay blocked:', err);
-                    onAutoplayBlocked?.();
-                });
+                const playPromise = audioRef.current.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch((err) => {
+                        console.warn('[Audio] Autoplay blocked, waiting for user interaction:', err);
+                        onAutoplayBlocked?.();
+                    });
+                }
             } else {
                 audioRef.current.srcObject = null;
             }
@@ -80,7 +84,7 @@ const VideoTile: React.FC<{
 
     return (
         <div className={`teams-video-tile ${isSpeaking ? 'active-speaker' : ''} ${isPinned ? 'pinned-tile' : ''} ${isScreenSharing ? 'tile-screen-share' : ''}`}>
-            {!isSelf && <audio ref={audioRef} autoPlay playsInline />}
+            {!isSelf && <audio ref={audioRef} autoPlay playsInline muted={false} />}
 
             <video 
                 ref={videoRef}
