@@ -49,7 +49,9 @@ export const DEFAULT_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
 const getRTCConfiguration = (): RTCConfiguration => {
     const iceServers: RTCIceServer[] = [
         { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:global.stun.twilio.com:3478' },
     ];
 
     const turnUrl = import.meta.env.VITE_TURN_URL;
@@ -70,6 +72,8 @@ const getRTCConfiguration = (): RTCConfiguration => {
                 'turn:openrelay.metered.ca:80',
                 'turn:openrelay.metered.ca:443',
                 'turn:openrelay.metered.ca:443?transport=tcp',
+                'turns:openrelay.metered.ca:443?transport=tcp',
+                'turns:openrelay.metered.ca:5349?transport=tcp',
             ],
             username: 'openrelayproject',
             credential: 'openrelayproject',
