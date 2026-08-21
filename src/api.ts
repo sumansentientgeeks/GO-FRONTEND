@@ -1,7 +1,6 @@
-const envApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
-const isLocalDev = typeof window !== 'undefined' && (window.location.port === '5173' || window.location.port === '3000');
+import { apiClient, API_BASE } from './api/client';
 
-export const API_BASE = envApiUrl ? `${envApiUrl}/api` : (isLocalDev ? '/api' : `http://${window.location.hostname || 'localhost'}:8080/api`);
+export { API_BASE, apiClient };
 
 export interface UserAuthResponse {
     token: string;
@@ -13,70 +12,50 @@ export interface UserAuthResponse {
 }
 
 export const registerUser = async (username: string, email: string, password: string): Promise<UserAuthResponse> => {
-    const response = await fetch(`${API_BASE}/users/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, email, password }),
+    const response = await apiClient.post<UserAuthResponse>('/users/register', {
+        username,
+        email,
+        password,
     });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Registration failed' }));
-        throw new Error(error.error || 'Registration failed');
-    }
-
-    return response.json();
+    return response.data;
 };
 
 export const loginUser = async (email: string, password: string): Promise<UserAuthResponse> => {
-    const response = await fetch(`${API_BASE}/users/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+    const response = await apiClient.post<UserAuthResponse>('/users/login', {
+        email,
+        password,
     });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Login failed' }));
-        throw new Error(error.error || 'Login failed');
-    }
-
-    return response.json();
+    return response.data;
 };
 
-export const getLiveKitToken = async (roomId: string, token?: string, userName?: string) => {
+export const getLiveKitToken = async (roomId: string, token?: string, userName?: string): Promise<{ token: string; room_name: string }> => {
     const headers: Record<string, string> = {};
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
     }
-    const query = userName ? `?user_name=${encodeURIComponent(userName)}` : '';
-    const response = await fetch(`${API_BASE}/rooms/${roomId}/call-token${query}`, {
-        method: 'GET',
-        headers,
-    });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Failed to get room token' }));
-        throw new Error(error.error || 'Failed to get room token');
+    const params: Record<string, string> = {};
+    if (userName) {
+        params['user_name'] = userName;
     }
 
-    return response.json();
+    const response = await apiClient.get<{ token: string; room_name: string }>(`/rooms/${roomId}/call-token`, {
+        headers,
+        params,
+    });
+    return response.data;
 };
 
 export const createRoom = async (roomId: string): Promise<{ status: string; room_id: string }> => {
-    const response = await fetch(`${API_BASE}/rooms/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room_id: roomId }),
+    const response = await apiClient.post<{ status: string; room_id: string }>('/rooms/create', {
+        room_id: roomId,
     });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Failed to create room' }));
-        throw new Error(error.error || 'Failed to create room');
-    }
-
-    return response.json();
+    return response.data;
 };
 
 export const getSFUSignalingURL = (roomId: string, userId: string, userName: string): string => {
+    const envApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+    const isLocalDev = typeof window !== 'undefined' && (window.location.port === '5173' || window.location.port === '3000');
+    
     let wsBase: string;
     if (envApiUrl) {
         wsBase = envApiUrl.replace(/^http(s?):/, 'ws$1:');
