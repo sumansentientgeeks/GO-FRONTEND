@@ -162,6 +162,8 @@ export const TeamsLobby: React.FC = () => {
         setIsAudioMuted(prev => !prev);
     };
 
+    const [callEngine, setCallEngine] = useState<'livekit' | 'sfu'>('livekit');
+
     const handleJoinMeeting = (targetRoomId?: string) => {
         const target = (targetRoomId || roomId || 'general').trim();
         const user = displayName.trim() || 'User_' + Math.floor(1000 + Math.random() * 9000);
@@ -175,7 +177,11 @@ export const TeamsLobby: React.FC = () => {
             previewStream.getTracks().forEach(t => t.stop());
         }
 
-        navigate(`/meeting/${target}`);
+        if (callEngine === 'livekit') {
+            navigate(`/room/${target}`);
+        } else {
+            navigate(`/meeting/${target}`);
+        }
     };
 
     const handleCreateNewMeeting = () => {
@@ -420,6 +426,29 @@ export const TeamsLobby: React.FC = () => {
                                     onClick={() => setUserRole('audience')}
                                 >
                                     <Users size={14} /> Audience (1k+ scale)
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Engine Selector */}
+                        <div className="role-selector-box" style={{ marginTop: '0.75rem' }}>
+                            <span className="role-label">Meeting Engine:</span>
+                            <div className="role-toggle-group">
+                                <button 
+                                    type="button" 
+                                    className={`role-toggle-btn ${callEngine === 'livekit' ? 'selected' : ''}`}
+                                    onClick={() => setCallEngine('livekit')}
+                                    title="Uses LiveKit Cloud global edge network for guaranteed audio/video"
+                                >
+                                    <Zap size={14} color="#38bdf8" /> LiveKit Cloud (Recommended)
+                                </button>
+                                <button 
+                                    type="button" 
+                                    className={`role-toggle-btn ${callEngine === 'sfu' ? 'selected' : ''}`}
+                                    onClick={() => setCallEngine('sfu')}
+                                    title="Uses custom Pion SFU WebRTC engine"
+                                >
+                                    <Radio size={14} /> Pion SFU (Render)
                                 </button>
                             </div>
                         </div>
