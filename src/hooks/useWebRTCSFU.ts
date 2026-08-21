@@ -129,6 +129,8 @@ export const useWebRTCSFU = (
     const cameraVideoTrackRef = useRef<MediaStreamTrack | null>(null);
     const screenStreamRef = useRef<MediaStream | null>(null);
     const videoSenderRef = useRef<RTCRtpSender | null>(null);
+    const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+    const wsQueueRef = useRef<any[]>([]);
 
     // Audio level analysis for active speaker detection
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -157,6 +159,9 @@ export const useWebRTCSFU = (
             pcRef.current = null;
         }
 
+        pendingCandidatesRef.current = [];
+        wsQueueRef.current = [];
+
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach((t) => t.stop());
             localStreamRef.current = null;
@@ -181,10 +186,26 @@ export const useWebRTCSFU = (
         setConnecting(false);
     }, []);
 
-    // Send a message over WebSocket
+    // Send a message over WebSocket, buffering if not yet open
     const sendWS = useCallback((data: any) => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify(data));
+        } else {
+            wsQueueRef.current.push(data);
+        }
+    }, []);
+
+    // Drain buffered remote ICE candidates once remote description is set
+    const drainRemoteCandidates = useCallback(async () => {
+        if (!pcRef.current || !pcRef.current.remoteDescription) return;
+        const candidates = [...pendingCandidatesRef.current];
+        pendingCandidatesRef.current = [];
+        for (const cand of candidates) {
+            try {
+                await pcRef.current.addIceCandidate(new RTCIceCandidate(cand));
+            } catch (e) {
+                console.warn('[WebRTC SFU] Drain candidate error:', e);
+            }
         }
     }, []);
 
@@ -360,6 +381,26 @@ export const useWebRTCSFU = (
                     }
                 };
 
+                pc.oniceconnectionstatechange = () => {
+                    const state = pc.iceConnectionState;
+                    console.log(`[WebRTC SFU] ICE Connection State changed: ${state}`);
+                    if (state === 'connected' || state === 'completed') {
+                        setConnected(true);
+                        setConnecting(false);
+                    } else if (state === 'failed') {
+                        console.warn('[WebRTC SFU] ICE failed, attempting ICE restart...');
+                        if (typeof pc.restartIce === 'function') {
+                            try {
+                                pc.restartIce();
+                            } catch (e) {
+                                console.warn('[WebRTC SFU] restartIce error:', e);
+                            }
+                        }
+                    } else if (state === 'disconnected' || state === 'closed') {
+                        setConnected(false);
+                    }
+                };
+
                 pc.onconnectionstatechange = () => {
                     if (pc.connectionState === 'connected') {
                         setConnected(true);
@@ -375,6 +416,16 @@ export const useWebRTCSFU = (
                 wsRef.current = ws;
 
                 ws.onopen = async () => {
+                    // Flush any queued messages
+                    while (wsQueueRef.current.length > 0) {
+                        const queued = wsQueueRef.current.shift();
+                        try {
+                            ws.send(JSON.stringify(queued));
+                        } catch (qErr) {
+                            console.warn('[WebRTC SFU] Error flushing queue:', qErr);
+                        }
+                    }
+
                     try {
                         const offer = await pc.createOffer({
                             offerToReceiveAudio: true,
@@ -420,6 +471,7 @@ export const useWebRTCSFU = (
                                             type: 'answer',
                                             sdp: sdpObj.sdp || sdpObj,
                                         }));
+                                        await drainRemoteCandidates();
                                     }
                                     setConnected(true);
                                     setConnecting(false);
@@ -439,6 +491,8 @@ export const useWebRTCSFU = (
                                         type: 'offer',
                                         sdp: sdpObj.sdp || sdpObj,
                                     }));
+                                    await drainRemoteCandidates();
+
                                     const answer = await pcRef.current.createAnswer();
                                     await pcRef.current.setLocalDescription(answer);
                                     sendWS({
@@ -455,10 +509,14 @@ export const useWebRTCSFU = (
 
                             case 'ice_candidate':
                                 if (msg.candidate && pcRef.current) {
-                                    try {
-                                        await pcRef.current.addIceCandidate(new RTCIceCandidate(msg.candidate));
-                                    } catch (iceErr) {
-                                        console.warn('Error adding ICE candidate:', iceErr);
+                                    if (!pcRef.current.remoteDescription) {
+                                        pendingCandidatesRef.current.push(msg.candidate);
+                                    } else {
+                                        try {
+                                            await pcRef.current.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                                        } catch (iceErr) {
+                                            console.warn('[WebRTC SFU] Error adding ICE candidate:', iceErr);
+                                        }
                                     }
                                 }
                                 break;
@@ -702,7 +760,12 @@ export const useWebRTCSFU = (
 
                 ws.onerror = (e) => {
                     console.error('SFU WebSocket Error:', e);
-                    setError('Unable to connect to WebRTC SFU signaling server');
+                    const isProd = typeof window !== 'undefined' && !window.location.hostname.includes('localhost');
+                    if (isProd && !import.meta.env.VITE_API_URL) {
+                        setError('Unable to connect to WebRTC SFU signaling server (VITE_API_URL environment variable is missing on Vercel/production)');
+                    } else {
+                        setError('Unable to connect to WebRTC SFU signaling server. If using Render Free tier, the backend may be waking up (please wait ~30s and refresh).');
+                    }
                     setConnecting(false);
                 };
 
