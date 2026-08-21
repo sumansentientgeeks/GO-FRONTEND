@@ -78,7 +78,7 @@ const getRTCConfiguration = (): RTCConfiguration => {
 
     return {
         iceServers,
-        bundlePolicy: 'max-bundle',
+        bundlePolicy: 'balanced',
         rtcpMuxPolicy: 'require',
     };
 };
