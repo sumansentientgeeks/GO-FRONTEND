@@ -5,7 +5,7 @@ import {
   RoomAudioRenderer,
   StartAudio,
   useLocalParticipant,
-  useTracks,
+  useParticipants,
   useMediaDeviceSelect,
   VideoTrack,
 } from '@livekit/components-react';
@@ -169,112 +169,211 @@ const AudioOutputSelector: React.FC<{ isOpen: boolean; onClose: () => void }> = 
     );
 };
 
-// Custom Video Tiles Grid
+// Individual Participant Card in Microsoft Teams Style
+interface ParticipantTileProps {
+    participant: any;
+    isPinned?: boolean;
+    onPin?: () => void;
+}
+
+const ParticipantTile: React.FC<ParticipantTileProps> = ({ participant, isPinned, onPin }) => {
+    const isSpeaking = participant.isSpeaking;
+    const isLocal = participant.isLocal;
+    const isMuted = !participant.isMicrophoneEnabled;
+    const isCameraEnabled = participant.isCameraEnabled;
+    const isScreenSharing = participant.isScreenShareEnabled;
+
+    const cameraPub = participant.getTrackPublication(Track.Source.Camera);
+    const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
+
+    const displayName = participant.name || participant.identity || (isLocal ? 'You' : 'Participant');
+    const avatarBg = getAvatarColor(displayName);
+
+    return (
+        <div 
+            className={`teams-video-tile ${isSpeaking ? 'active-speaker' : ''} ${isPinned ? 'pinned-tile' : ''} ${isScreenSharing ? 'tile-screen-share' : ''}`}
+            onClick={onPin}
+            style={{
+                position: 'relative',
+                width: '100%',
+                height: '100%',
+                minHeight: '200px',
+                background: '#1f1f23',
+                borderRadius: '10px',
+                overflow: 'hidden',
+                cursor: onPin ? 'pointer' : 'default',
+                border: isSpeaking ? '2px solid #5b5fc7' : '1px solid rgba(255, 255, 255, 0.08)',
+                boxShadow: isSpeaking ? '0 0 16px rgba(91, 95, 199, 0.45)' : 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+            }}
+        >
+            {/* Live Video / Screen Share View */}
+            {isScreenSharing && screenPub && screenPub.track ? (
+                <VideoTrack
+                    trackRef={{ participant, source: Track.Source.ScreenShare, publication: screenPub }}
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                    }}
+                />
+            ) : isCameraEnabled && cameraPub && cameraPub.track ? (
+                <VideoTrack
+                    trackRef={{ participant, source: Track.Source.Camera, publication: cameraPub }}
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        transform: isLocal ? 'scaleX(-1)' : 'none',
+                    }}
+                />
+            ) : (
+                /* Teams Avatar Circle View when Camera is OFF */
+                <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.75rem',
+                    width: '100%',
+                    height: '100%',
+                    background: 'radial-gradient(circle at 50% 40%, #26252b 0%, #151419 100%)',
+                }}>
+                    <div style={{
+                        width: '84px',
+                        height: '84px',
+                        borderRadius: '50%',
+                        background: avatarBg,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '2rem',
+                        fontWeight: 700,
+                        color: '#ffffff',
+                        boxShadow: isSpeaking ? '0 0 0 4px #5b5fc7, 0 4px 20px rgba(0,0,0,0.5)' : '0 4px 16px rgba(0,0,0,0.4)',
+                        transition: 'all 0.2s ease',
+                    }}>
+                        {displayName.charAt(0).toUpperCase()}
+                    </div>
+                </div>
+            )}
+
+            {/* Top Right Badges: Screen Share or Hand */}
+            <div style={{
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                zIndex: 10
+            }}>
+                {isScreenSharing && (
+                    <div style={{
+                        background: 'rgba(59, 130, 246, 0.85)',
+                        backdropFilter: 'blur(8px)',
+                        color: '#ffffff',
+                        padding: '0.2rem 0.5rem',
+                        borderRadius: '6px',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.3rem'
+                    }}>
+                        <Monitor size={12} /> Presenting
+                    </div>
+                )}
+            </div>
+
+            {/* Bottom Left: Participant Name Tag & Mic Status */}
+            <div style={{
+                position: 'absolute',
+                bottom: '10px',
+                left: '10px',
+                background: 'rgba(24, 24, 28, 0.85)',
+                backdropFilter: 'blur(10px)',
+                padding: '0.3rem 0.65rem',
+                borderRadius: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                fontSize: '0.8rem',
+                color: '#ffffff',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                zIndex: 10
+            }}>
+                <span style={{ fontWeight: 500, maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {displayName} {isLocal ? '(You)' : ''}
+                </span>
+
+                {isMuted ? (
+                    <span title="Muted" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                        <MicOff size={13} color="#f87171" />
+                    </span>
+                ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                        <Mic size={13} color="#34d399" />
+                        {isSpeaking && (
+                            <span style={{
+                                width: '6px',
+                                height: '6px',
+                                borderRadius: '50%',
+                                background: '#38bdf8',
+                                display: 'inline-block',
+                                animation: 'pulseDot 1s infinite'
+                            }} />
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// Custom Video Grid for All Participants
 const CustomLiveKitConference: React.FC = () => {
-    const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare], { onlySubscribed: false });
+    const participants = useParticipants();
+    const [pinnedId, setPinnedId] = useState<string | null>(null);
+
+    const count = participants.length;
+    const gridClass = count === 1 ? 'grid-1' : count === 2 ? 'grid-2' : count <= 4 ? 'grid-4' : count <= 6 ? 'grid-6' : 'grid-many';
 
     return (
         <div style={{
             flex: 1,
-            display: 'grid',
-            gridTemplateColumns: tracks.length <= 1 ? '1fr' : tracks.length <= 4 ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(320px, 1fr))',
-            gap: '12px',
-            padding: '16px',
+            display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            overflow: 'auto',
-            background: '#07090e'
+            padding: '1rem',
+            background: '#111014',
+            overflow: 'hidden',
+            position: 'relative'
         }}>
-            {tracks.map((trackRef) => {
-                const participant = trackRef.participant;
-                const isSpeaking = participant.isSpeaking;
-                const isLocal = participant.isLocal;
-                const isMuted = !participant.isMicrophoneEnabled;
-                const isCameraOff = !participant.isCameraEnabled && trackRef.source === Track.Source.Camera;
-                const isScreenShare = trackRef.source === Track.Source.ScreenShare;
-
-                return (
-                    <div
-                        key={trackRef.publication?.trackSid || `${participant.identity}-${trackRef.source}`}
-                        style={{
-                            position: 'relative',
-                            width: '100%',
-                            height: '100%',
-                            minHeight: '220px',
-                            background: '#111827',
-                            borderRadius: '12px',
-                            overflow: 'hidden',
-                            border: isSpeaking ? '2px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.08)',
-                            boxShadow: isSpeaking ? '0 0 20px rgba(56, 189, 248, 0.25)' : 'none',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            transition: 'all 0.2s ease',
-                        }}
-                    >
-                        {/* Video Element */}
-                        {!isCameraOff ? (
-                            <VideoTrack
-                                trackRef={trackRef}
-                                style={{
-                                    width: '100%',
-                                    height: '100%',
-                                    objectFit: isScreenShare ? 'contain' : 'cover',
-                                    transform: isLocal && !isScreenShare ? 'scaleX(-1)' : 'none'
-                                }}
-                            />
-                        ) : (
-                            /* Avatar placeholder when camera is off */
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
-                                <div style={{
-                                    width: '72px',
-                                    height: '72px',
-                                    borderRadius: '50%',
-                                    background: getAvatarColor(participant.name || participant.identity),
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '1.75rem',
-                                    fontWeight: 700,
-                                    color: '#ffffff',
-                                    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.4)'
-                                }}>
-                                    {(participant.name || participant.identity).charAt(0).toUpperCase()}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Bottom Overlay Label */}
-                        <div style={{
-                            position: 'absolute',
-                            bottom: '10px',
-                            left: '10px',
-                            background: 'rgba(15, 23, 42, 0.75)',
-                            backdropFilter: 'blur(8px)',
-                            padding: '0.25rem 0.6rem',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.4rem',
-                            fontSize: '0.78rem',
-                            color: '#f8fafc',
-                            zIndex: 5
-                        }}>
-                            <span>{participant.name || participant.identity} {isLocal ? '(You)' : ''}</span>
-                            {isMuted ? (
-                                <MicOff size={13} color="#f87171" />
-                            ) : (
-                                <Mic size={13} color="#34d399" />
-                            )}
-                            {isScreenShare && (
-                                <span style={{ color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-                                    <Monitor size={12} /> Screen
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                );
-            })}
+            <div 
+                className={`teams-video-grid ${gridClass}`}
+                style={{
+                    display: 'grid',
+                    gap: '0.75rem',
+                    width: '100%',
+                    height: '100%',
+                    maxHeight: 'calc(100vh - 140px)',
+                    gridTemplateColumns: count === 1 ? '1fr' : count === 2 ? 'repeat(2, 1fr)' : count <= 4 ? 'repeat(2, 1fr)' : count <= 6 ? 'repeat(3, 1fr)' : 'repeat(auto-fit, minmax(280px, 1fr))',
+                    gridTemplateRows: count <= 2 ? '1fr' : count <= 4 ? 'repeat(2, 1fr)' : count <= 6 ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(200px, 1fr))',
+                }}
+            >
+                {participants.map((p: any) => (
+                    <ParticipantTile 
+                        key={p.identity} 
+                        participant={p} 
+                        isPinned={pinnedId === p.identity}
+                        onPin={() => setPinnedId(prev => prev === p.identity ? null : p.identity)}
+                    />
+                ))}
+            </div>
         </div>
     );
 };
